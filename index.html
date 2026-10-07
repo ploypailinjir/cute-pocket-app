@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Pocket Plan">
+<meta name="theme-color" content="#FFE4EC">
+<title>Cute Pocket Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"></script>
+<script>
+tailwind.config = { theme: { extend: {
+  fontFamily: { sans: ['Prompt', 'sans-serif'] },
+  colors: { blush: '#FFE4EC', rose: '#E8788F', rosedk: '#C9506B', mint: '#CDEFE0', mintdk: '#4FA383', cream: '#FFF8EC', ink: '#5B3A45' }
+}}}
+</script>
+<style>
+  body { background: #FFE4EC; font-family: 'Prompt', sans-serif; color: #5B3A45;
+         padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+  .card { background: #FFF8EC; border-radius: 1.5rem; box-shadow: 0 4px 14px rgba(232,120,143,.15); }
+  input, select { background: #fff; border: 2px solid #FBD3DE; border-radius: 1rem; padding: .6rem .9rem; width: 100%; outline: none; }
+  input:focus, select:focus { border-color: #E8788F; }
+  .btn { border-radius: 1rem; padding: .6rem 1rem; font-weight: 500; transition: transform .1s; }
+  .btn:active { transform: scale(.96); }
+  [v-cloak] { display: none; }
+</style>
+</head>
+<body>
+<div id="app" v-cloak class="max-w-md mx-auto px-4 pb-24 pt-5">
+
+  <h1 class="text-center text-2xl font-semibold text-rosedk mb-4">🌸 Cute Pocket Plan</h1>
+
+  <!-- Summary -->
+  <div class="grid grid-cols-2 gap-3 mb-4">
+    <div class="rounded-3xl p-4 bg-mint">
+      <div class="text-xs text-mintdk">เงินคงเหลือ</div>
+      <div class="text-xl font-semibold" :class="balance < 0 ? 'text-rosedk' : 'text-ink'">฿{{ fmt(balance) }}</div>
+      <div class="text-[11px] text-ink/60 mt-1">รับ {{ fmt(totalIncome) }} · จ่าย {{ fmt(totalExpense) }}</div>
+    </div>
+    <div class="rounded-3xl p-4 bg-rose/90 text-white">
+      <div class="text-xs opacity-90">หนี้สินคงเหลือรวม</div>
+      <div class="text-xl font-semibold">฿{{ fmt(totalDebt) }}</div>
+      <div class="text-[11px] opacity-90 mt-1">ผ่อนขั้นต่ำ {{ fmt(totalMin) }}/เดือน</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex bg-white/70 rounded-2xl p-1 mb-4">
+    <button v-for="t in tabs" :key="t.id" @click="tab = t.id"
+      class="flex-1 py-2 rounded-xl text-sm font-medium"
+      :class="tab === t.id ? 'bg-rose text-white' : 'text-ink/70'">{{ t.label }}</button>
+  </div>
+
+  <!-- Transactions tab -->
+  <section v-if="tab === 'tx'">
+    <form @submit.prevent="addTx" class="card p-4 mb-4 space-y-3">
+      <div class="flex gap-2">
+        <button type="button" @click="tx.type = 'income'" class="btn flex-1" :class="tx.type === 'income' ? 'bg-mintdk text-white' : 'bg-white text-ink/70'">รายรับ</button>
+        <button type="button" @click="tx.type = 'expense'" class="btn flex-1" :class="tx.type === 'expense' ? 'bg-rose text-white' : 'bg-white text-ink/70'">รายจ่าย</button>
+      </div>
+      <input v-model="tx.name" placeholder="ชื่อรายการ เช่น ข้าวกลางวัน" required>
+      <input v-model.number="tx.amount" type="number" inputmode="decimal" min="0.01" step="any" placeholder="จำนวนเงิน (บาท)" required>
+      <div class="flex gap-2">
+        <select v-model="tx.categoryId">
+          <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.emoji }} {{ c.name }}</option>
+        </select>
+        <button type="button" @click="showCat = true" class="btn bg-white border-2 border-blush shrink-0" aria-label="จัดการหมวดหมู่">⚙️</button>
+      </div>
+      <button class="btn w-full bg-rose text-white">บันทึกรายการ</button>
+    </form>
+
+    <h2 class="font-medium mb-2 px-1">ประวัติรายการ</h2>
+    <p v-if="!transactions.length" class="text-center text-ink/50 py-8 text-sm">ยังไม่มีรายการ เพิ่มรายการแรกด้านบนได้เลย 🐰</p>
+    <ul class="space-y-2">
+      <li v-for="t in sortedTx" :key="t.id" class="card px-4 py-3 flex items-center gap-3">
+        <div class="w-10 h-10 rounded-2xl bg-blush flex items-center justify-center text-xl">{{ cat(t.categoryId).emoji }}</div>
+        <div class="flex-1 min-w-0">
+          <div class="truncate font-medium text-sm">{{ t.name }}</div>
+          <div class="text-[11px] text-ink/50">{{ cat(t.categoryId).name }} · {{ dateStr(t.date) }}</div>
+        </div>
+        <div class="font-semibold text-sm" :class="t.type === 'income' ? 'text-mintdk' : 'text-rosedk'">
+          {{ t.type === 'income' ? '+' : '-' }}{{ fmt(t.amount) }}
+        </div>
+        <button @click="delTx(t.id)" class="text-ink/40 text-lg px-1" aria-label="ลบรายการ">🗑️</button>
+      </li>
+    </ul>
+  </section>
+
+  <!-- Debt tab -->
+  <section v-if="tab === 'debt'">
+    <form @submit.prevent="addDebt" class="card p-4 mb-4 space-y-3">
+      <input v-model="debt.name" placeholder="ชื่อหนี้ เช่น บัตรเครดิต" required>
+      <input v-model.number="debt.total" type="number" inputmode="decimal" min="1" step="any" placeholder="ยอดหนี้รวมทั้งหมด" required>
+      <input v-model.number="debt.minPay" type="number" inputmode="decimal" min="0" step="any" placeholder="ผ่อนขั้นต่ำต่อเดือน" required>
+      <input v-model.number="debt.dueDay" type="number" inputmode="numeric" min="1" max="31" step="1" placeholder="กำหนดชำระทุกวันที่ (1-31) ไม่บังคับ">
+      <button class="btn w-full bg-rose text-white">เพิ่มหนี้</button>
+    </form>
+
+    <p v-if="!debts.length" class="text-center text-ink/50 py-8 text-sm">ยังไม่มีหนี้ที่ติดตาม เก่งมาก! 🎉</p>
+    <div class="space-y-3">
+      <div v-for="d in debts" :key="d.id" class="card p-4">
+        <div class="flex justify-between items-start">
+          <div>
+            <div class="font-medium">{{ d.name }}</div>
+            <div class="text-[11px] text-ink/50">ขั้นต่ำ ฿{{ fmt(d.minPay) }}/เดือน<span v-if="d.dueDay"> · ครบกำหนดทุกวันที่ {{ d.dueDay }}</span></div>
+            <div v-if="d.dueDay && d.remaining > 0" class="inline-block mt-1.5 text-[11px] px-2.5 py-0.5 rounded-full"
+              :class="dueInfo(d).days <= 3 ? 'bg-rose text-white' : 'bg-mint text-mintdk'">
+              📅 {{ dueInfo(d).text }}
+            </div>
+          </div>
+          <button @click="delDebt(d.id)" class="text-ink/40" aria-label="ลบหนี้">🗑️</button>
+        </div>
+        <div class="flex justify-between text-sm mt-3">
+          <span>เหลือ ฿{{ fmt(d.remaining) }}</span>
+          <span class="text-mintdk font-medium">{{ pct(d) }}%</span>
+        </div>
+        <div class="h-3 rounded-full bg-blush mt-1 overflow-hidden">
+          <div class="h-full rounded-full bg-mintdk transition-all duration-500" :style="{ width: pct(d) + '%' }"></div>
+        </div>
+        <div class="text-[11px] text-ink/50 mt-1">จากยอดรวม ฿{{ fmt(d.total) }}</div>
+        <div v-if="d.remaining > 0" class="flex gap-2 mt-3">
+          <input v-model.number="payInputs[d.id]" type="number" inputmode="decimal" min="0.01" step="any" :placeholder="'ชำระ (ขั้นต่ำ ' + fmt(d.minPay) + ')'">
+          <button @click="payDebt(d)" class="btn bg-mintdk text-white shrink-0">ชำระหนี้</button>
+        </div>
+        <div v-else class="mt-3 text-center text-mintdk font-medium text-sm">ปลดหนี้ก้อนนี้แล้ว 🎉</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Summary tab -->
+  <section v-if="tab === 'sum'">
+    <div class="flex bg-white/70 rounded-2xl p-1 mb-3">
+      <button v-for="p in periods" :key="p.id" @click="period = p.id"
+        class="flex-1 py-1.5 rounded-xl text-sm" :class="period === p.id ? 'bg-mintdk text-white' : 'text-ink/70'">{{ p.label }}</button>
+    </div>
+    <p v-if="!groups.length" class="text-center text-ink/50 py-8 text-sm">ยังไม่มีข้อมูลให้สรุป เพิ่มรายการก่อนนะ 🐰</p>
+    <ul class="space-y-2">
+      <li v-for="g in groups" :key="g.key" class="card p-4">
+        <div class="font-medium text-sm mb-2">{{ g.label }}</div>
+        <div class="grid grid-cols-3 gap-2 text-center">
+          <div class="rounded-2xl bg-mint py-2"><div class="text-[11px] text-mintdk">รายรับ</div><div class="text-sm font-semibold">{{ fmt(g.income) }}</div></div>
+          <div class="rounded-2xl bg-blush py-2"><div class="text-[11px] text-rosedk">รายจ่าย</div><div class="text-sm font-semibold">{{ fmt(g.expense) }}</div></div>
+          <div class="rounded-2xl bg-white py-2"><div class="text-[11px] text-ink/60">คงเหลือ</div><div class="text-sm font-semibold" :class="g.income - g.expense < 0 ? 'text-rosedk' : 'text-ink'">{{ fmt(g.income - g.expense) }}</div></div>
+        </div>
+      </li>
+    </ul>
+  </section>
+
+  <div class="text-center mt-6">
+    <button @click="backupOpen = true" class="btn bg-white/80 text-sm text-ink/70">💌 ข้อมูลสำรอง</button>
+  </div>
+
+  <!-- Backup modal -->
+  <div v-if="backupOpen" class="fixed inset-0 bg-ink/40 flex items-center justify-center z-50 px-5" @click.self="backupOpen = false">
+    <div class="bg-cream rounded-3xl w-full max-w-md p-5">
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="font-semibold text-lg">ข้อมูลสำรอง</h3>
+        <button @click="backupOpen = false" class="text-xl" aria-label="ปิด">✕</button>
+      </div>
+      <p class="text-xs text-ink/60 mb-2">กดคัดลอก แล้วนำไปวางในแชทกับ Claude หรือบันทึกไว้ในอีเมล</p>
+      <textarea ref="backupBox" readonly :value="backupText" rows="7" class="w-full rounded-2xl border-2 border-blush bg-white p-2 text-[11px] font-mono"></textarea>
+      <button @click="copyBackup" class="btn w-full bg-rose text-white mt-3">{{ copied ? 'คัดลอกแล้ว ✓' : 'คัดลอกข้อมูล' }}</button>
+    </div>
+  </div>
+
+  <!-- Confirm modal -->
+  <div v-if="confirmBox.show" class="fixed inset-0 bg-ink/40 flex items-center justify-center z-[60] px-6" @click.self="closeConfirm">
+    <div class="bg-cream rounded-3xl w-full max-w-xs p-5 text-center">
+      <div class="text-3xl mb-2">🥺</div>
+      <p class="font-medium mb-1">{{ confirmBox.text }}</p>
+      <p class="text-xs text-ink/50 mb-4">ลบแล้วจะกู้คืนไม่ได้</p>
+      <div class="flex gap-2">
+        <button @click="closeConfirm" class="btn flex-1 bg-white">ยกเลิก</button>
+        <button @click="runConfirm" class="btn flex-1 bg-rose text-white">ยืนยันลบ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category modal -->
+  <div v-if="showCat" class="fixed inset-0 bg-ink/40 flex items-end sm:items-center justify-center z-50" @click.self="showCat = false">
+    <div class="bg-cream rounded-t-3xl sm:rounded-3xl w-full max-w-md p-5 max-h-[85vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-semibold text-lg">จัดการหมวดหมู่</h3>
+        <button @click="showCat = false" class="text-xl" aria-label="ปิด">✕</button>
+      </div>
+      <form @submit.prevent="addCat" class="flex gap-2 mb-4">
+        <input v-model="newCat.emoji" maxlength="4" class="!w-16 text-center text-xl" placeholder="😀" required>
+        <input v-model="newCat.name" placeholder="ชื่อหมวดหมู่ใหม่" required>
+        <button class="btn bg-rose text-white shrink-0">เพิ่ม</button>
+      </form>
+      <ul class="space-y-2">
+        <li v-for="c in categories" :key="c.id" class="flex items-center gap-3 bg-white rounded-2xl px-3 py-2">
+          <span class="text-xl">{{ c.emoji }}</span>
+          <span class="flex-1 text-sm">{{ c.name }}</span>
+          <button v-if="!c.builtin" @click="delCat(c.id)" class="text-ink/40" aria-label="ลบหมวดหมู่">🗑️</button>
+          <span v-else class="text-[11px] text-ink/40">เริ่มต้น</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const { createApp, reactive, ref, computed, watch } = Vue;
+const KEY = 'cutePocketPlan.v1';
+
+const DEFAULT_CATS = [
+  { id: 'food',   emoji: '🍜', name: 'อาหาร', builtin: true },
+  { id: 'travel', emoji: '🚌', name: 'เดินทาง', builtin: true },
+  { id: 'goods',  emoji: '🧴', name: 'ของใช้', builtin: true },
+  { id: 'debt',   emoji: '💳', name: 'บิล/หนี้สิน', builtin: true },
+  { id: 'salary', emoji: '💰', name: 'เงินเดือน', builtin: true },
+  { id: 'other',  emoji: '🎀', name: 'อื่นๆ', builtin: true }
+];
+
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; }
+}
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+createApp({
+  setup() {
+    const saved = load();
+    const tab = ref('tx');
+    const tabs = [{ id: 'tx', label: '💸 รายการ' }, { id: 'debt', label: '🎯 ปลดหนี้' }, { id: 'sum', label: '📊 สรุป' }];
+    const categories = ref(saved.categories && saved.categories.length ? saved.categories : DEFAULT_CATS);
+    const transactions = ref(saved.transactions || []);
+    const debts = ref(saved.debts || []);
+    const showCat = ref(false);
+    const tx = reactive({ type: 'expense', name: '', amount: null, categoryId: 'food' });
+    const debt = reactive({ name: '', total: null, minPay: null, dueDay: null });
+    const newCat = reactive({ emoji: '', name: '' });
+    const payInputs = reactive({});
+    const confirmBox = reactive({ show: false, text: '', action: null });
+    function askConfirm(text, action) { confirmBox.text = text; confirmBox.action = action; confirmBox.show = true; }
+    function closeConfirm() { confirmBox.show = false; confirmBox.action = null; }
+    function runConfirm() { const f = confirmBox.action; closeConfirm(); if (f) f(); }
+
+    const backupOpen = ref(false), copied = ref(false), backupBox = ref(null);
+    const backupText = computed(() => JSON.stringify({ app: 'cute-pocket-plan', exportedAt: new Date().toISOString(), categories: categories.value, transactions: transactions.value, debts: debts.value }));
+    async function copyBackup() {
+      try { await navigator.clipboard.writeText(backupText.value); }
+      catch (e) { const el = backupBox.value; el.focus(); el.select(); el.setSelectionRange(0, 999999); document.execCommand('copy'); }
+      copied.value = true; setTimeout(() => copied.value = false, 2000);
+    }
+    const period = ref('day');
+    const periods = [{ id: 'day', label: 'รายวัน' }, { id: 'month', label: 'รายเดือน' }, { id: 'year', label: 'รายปี' }];
+    const groups = computed(() => {
+      const map = {};
+      transactions.value.forEach(t => {
+        const d = new Date(t.date), y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+        let key, label;
+        if (period.value === 'day') { key = y * 10000 + (m + 1) * 100 + day; label = d.toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' }); }
+        else if (period.value === 'month') { key = y * 100 + (m + 1); label = new Date(y, m, 1).toLocaleDateString('th-TH', { month: 'long', year: 'numeric' }); }
+        else { key = y; label = 'ปี ' + new Date(y, 0, 1).toLocaleDateString('th-TH', { year: 'numeric' }); }
+        const g = map[key] || (map[key] = { key, label, income: 0, expense: 0 });
+        g[t.type] += t.amount;
+      });
+      return Object.values(map).sort((a, b) => b.key - a.key);
+    });
+
+    watch([categories, transactions, debts], () => {
+      try { localStorage.setItem(KEY, JSON.stringify({ categories: categories.value, transactions: transactions.value, debts: debts.value })); } catch (e) {}
+    }, { deep: true });
+
+    const totalIncome = computed(() => transactions.value.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0));
+    const totalExpense = computed(() => transactions.value.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0));
+    const balance = computed(() => totalIncome.value - totalExpense.value);
+    const totalDebt = computed(() => debts.value.reduce((s, d) => s + d.remaining, 0));
+    const totalMin = computed(() => debts.value.filter(d => d.remaining > 0).reduce((s, d) => s + d.minPay, 0));
+    const sortedTx = computed(() => [...transactions.value].sort((a, b) => b.date - a.date));
+
+    const fmt = n => Number(n || 0).toLocaleString('th-TH', { maximumFractionDigits: 2 });
+    const dateStr = ts => new Date(ts).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+    const cat = id => categories.value.find(c => c.id === id) || { emoji: '🎀', name: 'อื่นๆ' };
+    const pct = d => d.total > 0 ? Math.min(100, Math.round((d.total - d.remaining) / d.total * 100)) : 0;
+
+    function addTx() {
+      if (!tx.name.trim() || !(tx.amount > 0)) return;
+      transactions.value.push({ id: uid(), type: tx.type, name: tx.name.trim(), amount: tx.amount, categoryId: tx.categoryId, date: Date.now() });
+      tx.name = ''; tx.amount = null;
+    }
+    function delTx(id) { askConfirm('ลบรายการนี้ใช่ไหม?', () => { transactions.value = transactions.value.filter(t => t.id !== id); }); }
+
+    function addCat() {
+      if (!newCat.name.trim() || !newCat.emoji.trim()) return;
+      categories.value.push({ id: uid(), emoji: newCat.emoji.trim(), name: newCat.name.trim(), builtin: false });
+      newCat.emoji = ''; newCat.name = '';
+    }
+    function delCat(id) {
+      askConfirm('ลบหมวดหมู่นี้ใช่ไหม? (รายการเดิมจะย้ายไป "อื่นๆ")', () => {
+        categories.value = categories.value.filter(c => c.id !== id);
+        transactions.value.forEach(t => { if (t.categoryId === id) t.categoryId = 'other'; });
+        if (tx.categoryId === id) tx.categoryId = 'food';
+      });
+    }
+
+    function dueInfo(d) {
+      const now = new Date(), today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const pick = (y, m) => new Date(y, m, Math.min(d.dueDay, new Date(y, m + 1, 0).getDate()));
+      let next = pick(today.getFullYear(), today.getMonth());
+      if (next < today) next = pick(today.getFullYear(), today.getMonth() + 1);
+      const days = Math.round((next - today) / 86400000);
+      const when = next.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+      const text = days === 0 ? 'ครบกำหนดวันนี้! (' + when + ')' : days === 1 ? 'ครบกำหนดพรุ่งนี้ (' + when + ')' : 'ครบกำหนด ' + when + ' · อีก ' + days + ' วัน';
+      return { days, text };
+    }
+    function addDebt() {
+      if (!debt.name.trim() || !(debt.total > 0)) return;
+      debts.value.push({ id: uid(), name: debt.name.trim(), total: debt.total, remaining: debt.total, minPay: debt.minPay || 0, dueDay: debt.dueDay >= 1 && debt.dueDay <= 31 ? Math.floor(debt.dueDay) : null });
+      debt.name = ''; debt.total = null; debt.minPay = null; debt.dueDay = null;
+    }
+    function delDebt(id) {
+      askConfirm('ลบหนี้ก้อนนี้ใช่ไหม? (รายจ่ายที่เคยบันทึกจะยังอยู่)', () => { debts.value = debts.value.filter(d => d.id !== id); });
+    }
+    function payDebt(d) {
+      let amt = Number(payInputs[d.id]);
+      if (!(amt > 0)) return;
+      amt = Math.min(amt, d.remaining);
+      d.remaining = Math.round((d.remaining - amt) * 100) / 100;
+      transactions.value.push({ id: uid(), type: 'expense', name: 'ชำระหนี้: ' + d.name, amount: amt, categoryId: 'debt', date: Date.now() });
+      payInputs[d.id] = null;
+    }
+
+    return { backupOpen, copied, backupBox, backupText, copyBackup, dueInfo, confirmBox, closeConfirm, runConfirm, period, periods, groups, tab, tabs, categories, transactions, debts, showCat, tx, debt, newCat, payInputs,
+      totalIncome, totalExpense, balance, totalDebt, totalMin, sortedTx,
+      fmt, dateStr, cat, pct, addTx, delTx, addCat, delCat, addDebt, delDebt, payDebt };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
